@@ -669,6 +669,8 @@ local connections = {
     InfJumpConnection     = nil,
     AntiAFK               = nil,
     MonsterESP            = nil,
+    FreecamLoop           = nil,
+    FreecamInput          = nil,
 }
 
 local threads = {}
@@ -3026,6 +3028,100 @@ local Button = DiabloTab:CreateButton({
     callback = function()
         if isLobbyPlace then return end
         ClientRemotes.openedBlueprintTable.fire()
+    end,
+})
+
+--// Batch 9 — camera. FOV setting and scriptable camera both verified live in
+--// the executor.
+
+local Section = DiabloTab:CreateSection({ name = "Camera" })
+
+local Slider = DiabloTab:CreateSlider({
+    name = "Field of View",
+    range = {30, 120},
+    increment = 1,
+    suffix = "FOV",
+    value = 70,
+    flag = "DiabloFOV",
+    callback = function(Value)
+        workspace.CurrentCamera.FieldOfView = Value
+    end,
+})
+
+local FreecamSpeed = 60
+
+local Slider = DiabloTab:CreateSlider({
+    name = "Freecam Speed",
+    range = {10, 300},
+    increment = 5,
+    suffix = "Speed",
+    value = FreecamSpeed,
+    flag = "DiabloFreecamSpeed",
+    callback = function(Value)
+        FreecamSpeed = Value
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Freecam (WASD + mouse, Space/Shift)",
+    value = false,
+    flag = "DiabloFreecam",
+    callback = function(Value)
+
+        local cam = workspace.CurrentCamera
+
+        if connections.FreecamLoop ~= nil then
+            connections.FreecamLoop:Disconnect()
+            connections.FreecamLoop = nil
+        end
+        if connections.FreecamInput ~= nil then
+            connections.FreecamInput:Disconnect()
+            connections.FreecamInput = nil
+        end
+
+        if Value then
+            local cf = cam.CFrame
+            cam.CameraType = Enum.CameraType.Scriptable
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+            local pitch, yaw = 0, 0
+            do
+                local _, y, _ = cf:ToOrientation()
+                yaw = y
+            end
+
+            connections.FreecamInput = UserInputService.InputChanged:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseMovement then
+                    yaw = yaw - input.Delta.X * 0.0025
+                    pitch = math.clamp(pitch - input.Delta.Y * 0.0025, -1.4, 1.4)
+                end
+            end)
+
+            connections.FreecamLoop = RunService.RenderStepped:Connect(function(dt)
+                if cam.CameraType ~= Enum.CameraType.Scriptable then
+                    cam.CameraType = Enum.CameraType.Scriptable
+                end
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+                local rot = CFrame.new(cf.Position) * CFrame.fromEulerAnglesYXZ(pitch, yaw, 0)
+
+                local dir = Vector3.zero
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += rot.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= rot.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= rot.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += rot.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0, 1, 0) end
+
+                if dir.Magnitude > 0 then
+                    cf = CFrame.new(cf.Position + dir.Unit * FreecamSpeed * dt)
+                end
+                cam.CFrame = CFrame.new(cf.Position) * CFrame.fromEulerAnglesYXZ(pitch, yaw, 0)
+            end)
+        else
+            cam.CameraType = Enum.CameraType.Custom
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        end
     end,
 })
 end
