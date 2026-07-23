@@ -667,6 +667,8 @@ local connections = {
     FlyLoop               = nil,
     NoclipLoop            = nil,
     InfJumpConnection     = nil,
+    AntiAFK               = nil,
+    MonsterESP            = nil,
 }
 
 local threads = {}
@@ -2854,6 +2856,99 @@ local Toggle = DiabloTab:CreateToggle({
                     hum:ChangeState(Enum.HumanoidStateType.Jumping)
                 end
             end)
+        end
+    end,
+})
+
+--// Batch 6 — client-side utility. Anti-AFK works anywhere; Monster ESP and
+--// Teleport to Nearest Monster are game-specific but use proven primitives
+--// (Highlight, CFrame writes).
+
+local Section = DiabloTab:CreateSection({ name = "Utility+" })
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Anti AFK",
+    value = false,
+    flag = "DiabloAntiAFK",
+    callback = function(Value)
+
+        if connections.AntiAFK ~= nil then
+            connections.AntiAFK:Disconnect()
+            connections.AntiAFK = nil
+        end
+
+        if Value then
+            local vu = game:GetService("VirtualUser")
+            connections.AntiAFK = plr.Idled:Connect(function()
+                vu:CaptureController()
+                vu:ClickButton2(Vector2.new())
+            end)
+        end
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Monster ESP",
+    value = false,
+    flag = "DiabloMonsterESP",
+    callback = function(Value)
+
+        if connections.MonsterESP ~= nil then
+            connections.MonsterESP:Disconnect()
+            connections.MonsterESP = nil
+        end
+
+        local function clearEsp()
+            if not Monsters then return end
+            for _, mob in pairs(Monsters:GetChildren()) do
+                local h = mob:FindFirstChild("DiabloESP")
+                if h then h:Destroy() end
+            end
+        end
+
+        if isLobbyPlace then return end
+
+        if Value then
+            connections.MonsterESP = RunService.Heartbeat:Connect(function()
+                if not Monsters then return end
+                for _, mob in pairs(Monsters:GetChildren()) do
+                    if mob:IsA("Model") and not mob:FindFirstChild("DiabloESP") then
+                        local hl = Instance.new("Highlight")
+                        hl.Name = "DiabloESP"
+                        hl.FillColor = Color3.fromRGB(255, 60, 60)
+                        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                        hl.FillTransparency = 0.6
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        hl.Parent = mob
+                    end
+                end
+            end)
+        else
+            clearEsp()
+        end
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Teleport to Nearest Monster",
+    callback = function()
+        if isLobbyPlace then return end
+        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local closest, bestDist
+        for _, mob in pairs(Monsters:GetChildren()) do
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            if root then
+                local d = (hrp.Position - root.Position).Magnitude
+                if not bestDist or d < bestDist then
+                    closest, bestDist = root, d
+                end
+            end
+        end
+
+        if closest then
+            hrp.CFrame = closest.CFrame * CFrame.new(0, 0, 6)
         end
     end,
 })
