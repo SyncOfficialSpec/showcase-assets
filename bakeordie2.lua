@@ -661,6 +661,8 @@ local connections = {
     AutoMakePies          = nil,
     AutoPickupIngredients = nil,
     AutoRoll              = nil,
+    AutoChainsaw          = nil,
+    AutoWizardSpell       = nil,
 }
 
 local threads = {}
@@ -688,6 +690,51 @@ local function getItemSlot(itemName, itemType)
             end
         end
         return false
+    end
+
+    return nil
+end
+
+-- Find the hotbar slot holding an item whose ObjectsLibrary entry carries the
+-- given tag (e.g. "WizardStaff", "HandCannon"). The chainsaw is tagged "Melee"
+-- but routes through its own remote, so it is matched by name instead. Returns
+-- the numeric slot string, or nil.
+local function getSlotByTag(tag, nameMatch)
+
+    if not (HotbarGui and SlotsGui) then return nil end
+    if isLobbyPlace then return nil end
+
+    for _, frame in pairs(SlotsGui:GetChildren()) do
+        if frame:IsA("Frame") then
+
+            local ImgButton = frame:FindFirstChild("Frame") and frame.Frame:FindFirstChild("ImageButton")
+            if ImgButton then
+
+                local ItemName = ImgButton:FindFirstChild("Name")
+                if ItemName then
+
+                    local objName = string.gsub(ItemName.Text, "%s+", "")
+                    local info = ObjectsLibrary.Objects[objName]
+
+                    if not info then
+                        for n, obj in pairs(ObjectsLibrary.Objects) do
+                            if obj.DisplayName == ItemName.Text then info = obj objName = n break end
+                        end
+                    end
+
+                    local matched = false
+                    if nameMatch and string.find(string.lower(objName), string.lower(nameMatch), 1, true) then
+                        matched = true
+                    elseif tag and info and info.Tags and table.find(info.Tags, tag) then
+                        matched = true
+                    end
+
+                    if matched then
+                        return ImgButton.SlotNumber.Text
+                    end
+                end
+            end
+        end
     end
 
     return nil
@@ -2400,9 +2447,11 @@ local Button = ScriptsTab:CreateButton({
 --- DIABLO
 ---------------------------------------------------------------
 -- Abilities wired to real game ClientRemotes. Every remote here is verified
--- against the game's own Zap schema (ReplicatedStorage.Shared.ZapTooling) and
--- takes no arguments, so it fires exactly as the game fires it. Batch 1.
+-- against the game's own Zap schema (ReplicatedStorage.Shared.ZapTooling).
+-- Wrapped in a do-block so the many throwaway element handles do not add to
+-- the main chunk's 200-local ceiling.
 
+do
 local Section = DiabloTab:CreateSection({ name = "Revives" })
 
 local Button = DiabloTab:CreateButton({
@@ -2531,6 +2580,115 @@ local Button = DiabloTab:CreateButton({
         ClientRemotes.activateSummon.fire({ direction = hrp.CFrame.LookVector })
     end,
 })
+
+--// Batch 3 — auto combat. chainsawAttack mirrors the melee kill-aura shape
+--// {monsters, corpses, activeSlot}; castWizardSpell takes {cframe, slotIndex}.
+--// Both remotes verified sendable; slots resolved by ObjectsLibrary tag/name.
+
+local Section = DiabloTab:CreateSection({ name = "Auto Combat" })
+
+local ChainsawRange = 60
+local WizardRange = 120
+
+local Slider = DiabloTab:CreateSlider({
+    name = "Chainsaw / Spell Range",
+    range = {10, 300},
+    increment = 5,
+    suffix = "Distance",
+    value = ChainsawRange,
+    flag = "DiabloRange",
+    callback = function(Value)
+        ChainsawRange = Value
+        WizardRange = Value
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Auto Chainsaw (hold a Chainsaw)",
+    value = false,
+    flag = "AutoChainsaw",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.AutoChainsaw ~= nil then
+            coroutine.close(connections.AutoChainsaw)
+            connections.AutoChainsaw = nil
+        end
+
+        if Value then
+            connections.AutoChainsaw = coroutine.create(function()
+                while task.wait(0.1) do
+                    local slot = getSlotByTag(nil, "Chainsaw")
+                    if not tonumber(slot) then continue end
+                    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                    if not hrp then continue end
+
+                    local targets = {}
+                    for _, mob in pairs(Monsters:GetChildren()) do
+                        local root = mob:FindFirstChild("HumanoidRootPart")
+                        if root and (hrp.Position - root.Position).Magnitude <= ChainsawRange then
+                            table.insert(targets, mob)
+                        end
+                    end
+
+                    if #targets > 0 then
+                        ClientRemotes.chainsawAttack.fire({
+                            monsters = targets,
+                            corpses = {},
+                            activeSlot = tonumber(slot),
+                        })
+                    end
+                end
+            end)
+            coroutine.resume(connections.AutoChainsaw)
+        end
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Auto Wizard Spell (hold a Wizard Staff)",
+    value = false,
+    flag = "AutoWizardSpell",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.AutoWizardSpell ~= nil then
+            coroutine.close(connections.AutoWizardSpell)
+            connections.AutoWizardSpell = nil
+        end
+
+        if Value then
+            connections.AutoWizardSpell = coroutine.create(function()
+                while task.wait(0.15) do
+                    local slot = getSlotByTag("WizardStaff") or getSlotByTag("UndeadStaff")
+                    if not tonumber(slot) then continue end
+                    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                    if not hrp then continue end
+
+                    local closest, bestDist
+                    for _, mob in pairs(Monsters:GetChildren()) do
+                        local root = mob:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            local d = (hrp.Position - root.Position).Magnitude
+                            if d <= WizardRange and (not bestDist or d < bestDist) then
+                                closest, bestDist = root, d
+                            end
+                        end
+                    end
+
+                    if closest then
+                        ClientRemotes.castWizardSpell.fire({
+                            cframe = closest.CFrame,
+                            slotIndex = tonumber(slot),
+                        })
+                    end
+                end
+            end)
+            coroutine.resume(connections.AutoWizardSpell)
+        end
+    end,
+})
+end
 
 ---------------------------------------------------------------
 --- TITLE FITTING
