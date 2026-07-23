@@ -2457,6 +2457,81 @@ local Button = DiabloTab:CreateButton({
     end,
 })
 
+--// Batch 2 — verified sendable (have .fire in ClientRemotes) with schemas
+--// matched to ReplicatedStorage.Shared.ZapTooling.
+
+local Section = DiabloTab:CreateSection({ name = "Nugget Revives" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Nugget Revive Everyone",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.useNuggetsReviveEveryone.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Nugget Revive Self",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.useNuggetsRevive.fire()
+    end,
+})
+
+local Section = DiabloTab:CreateSection({ name = "World" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Open Raygun Room",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.openRaygunRoom.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Open Facility Gate",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.openFacilityGate.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Insert Bakers DVD",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.insertBakersDvd.fire()
+    end,
+})
+
+local Section = DiabloTab:CreateSection({ name = "Utility" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Claim Group Reward",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.claimGroupReward.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Dismount Vehicle",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.dismountVehicle.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Activate Summon",
+    callback = function()
+        if isLobbyPlace then return end
+        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        ClientRemotes.activateSummon.fire({ direction = hrp.CFrame.LookVector })
+    end,
+})
+
 ---------------------------------------------------------------
 --- TITLE FITTING
 ---------------------------------------------------------------
