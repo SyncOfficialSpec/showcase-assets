@@ -663,6 +663,7 @@ local connections = {
     AutoRoll              = nil,
     AutoChainsaw          = nil,
     AutoWizardSpell       = nil,
+    AutoCannonBlast       = nil,
 }
 
 local threads = {}
@@ -2448,10 +2449,10 @@ local Button = ScriptsTab:CreateButton({
 ---------------------------------------------------------------
 -- Abilities wired to real game ClientRemotes. Every remote here is verified
 -- against the game's own Zap schema (ReplicatedStorage.Shared.ZapTooling).
--- Wrapped in a do-block so the many throwaway element handles do not add to
--- the main chunk's 200-local ceiling.
+-- Built inside its own function so the many throwaway element handles get a
+-- fresh 200-register budget instead of piling onto the main chunk's.
 
-do
+local function buildDiabloTab()
 local Section = DiabloTab:CreateSection({ name = "Revives" })
 
 local Button = DiabloTab:CreateButton({
@@ -2688,7 +2689,68 @@ local Toggle = DiabloTab:CreateToggle({
         end
     end,
 })
+
+--// Batch 4 — castCannonBlast mirrors the wizard shape {cframe, slotIndex};
+--// throwPie takes {slotIndex} and throws the pie in the active slot.
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Auto Cannon Blast (hold a Hand Cannon)",
+    value = false,
+    flag = "AutoCannonBlast",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.AutoCannonBlast ~= nil then
+            coroutine.close(connections.AutoCannonBlast)
+            connections.AutoCannonBlast = nil
+        end
+
+        if Value then
+            connections.AutoCannonBlast = coroutine.create(function()
+                while task.wait(0.15) do
+                    local slot = getSlotByTag("HandCannon")
+                    if not tonumber(slot) then continue end
+                    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                    if not hrp then continue end
+
+                    local closest, bestDist
+                    for _, mob in pairs(Monsters:GetChildren()) do
+                        local root = mob:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            local d = (hrp.Position - root.Position).Magnitude
+                            if d <= WizardRange and (not bestDist or d < bestDist) then
+                                closest, bestDist = root, d
+                            end
+                        end
+                    end
+
+                    if closest then
+                        ClientRemotes.castCannonBlast.fire({
+                            cframe = closest.CFrame,
+                            slotIndex = tonumber(slot),
+                        })
+                    end
+                end
+            end)
+            coroutine.resume(connections.AutoCannonBlast)
+        end
+    end,
+})
+
+local Section = DiabloTab:CreateSection({ name = "Throwables" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Throw Pie (active slot)",
+    callback = function()
+        if isLobbyPlace then return end
+        local slot = InventoryModule.getActiveSlot()
+        if not tonumber(slot) then return end
+        ClientRemotes.throwPie.fire({ slotIndex = tonumber(slot) })
+    end,
+})
 end
+
+buildDiabloTab()
 
 ---------------------------------------------------------------
 --- TITLE FITTING
