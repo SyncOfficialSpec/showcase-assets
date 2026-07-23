@@ -486,6 +486,7 @@ local VisualsTab = Window:CreateTab({ name = "Visuals", icon = 4483362458 })
 local TeleportTab = Window:CreateTab({ name = "Teleport", icon = 4483362458 })
 local SettingsTab = Window:CreateTab({ name = "Settings", icon = 4483362458 })
 local ScriptsTab = Window:CreateTab({ name = "Scripts", icon = 4483362458 })
+local DiabloTab = Window:CreateTab({ name = "DIABLO", icon = 4483362458 })
 
 local Section = HomeTab:CreateSection({ name = "Disord Server" })
 
@@ -2392,6 +2393,67 @@ local Button = ScriptsTab:CreateButton({
     name = "Load Infinite Yield",
     callback = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+    end,
+})
+
+---------------------------------------------------------------
+--- DIABLO
+---------------------------------------------------------------
+-- Abilities wired to real game ClientRemotes. Every remote here is verified
+-- against the game's own Zap schema (ReplicatedStorage.Shared.ZapTooling) and
+-- takes no arguments, so it fires exactly as the game fires it. Batch 1.
+
+local Section = DiabloTab:CreateSection({ name = "Revives" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Revive Everyone (Free)",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.useFreeReviveEveryone.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Revive Self (Free)",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.useFreeRevive.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Clutch Revive",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.useClutchRevive.fire()
+    end,
+})
+
+local Section = DiabloTab:CreateSection({ name = "Abilities" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Activate Overcharge",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.activateOvercharge.fire()
+    end,
+})
+
+local Section = DiabloTab:CreateSection({ name = "Character" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Reset Character",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.resetCharacter.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Return to Lobby",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.returnToLobby.fire()
     end,
 })
 
