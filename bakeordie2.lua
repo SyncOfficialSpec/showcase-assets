@@ -2991,6 +2991,43 @@ local Button = DiabloTab:CreateButton({
         end
     end,
 })
+
+--// Batch 8 — progression triggers. All no-arg, verified sendable, matched to
+--// the game's Zap schema.
+
+local Section = DiabloTab:CreateSection({ name = "Progression" })
+
+local Button = DiabloTab:CreateButton({
+    name = "Skip Cutscene",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.finishCutscene.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Flag Entered Sewer",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.enteredSewer.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Flag Entered Science Lab",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.enteredScienceLab.fire()
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Flag Opened Blueprint Table",
+    callback = function()
+        if isLobbyPlace then return end
+        ClientRemotes.openedBlueprintTable.fire()
+    end,
+})
 end
 
 buildDiabloTab()
