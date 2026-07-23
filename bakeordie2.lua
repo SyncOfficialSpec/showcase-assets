@@ -664,6 +664,9 @@ local connections = {
     AutoChainsaw          = nil,
     AutoWizardSpell       = nil,
     AutoCannonBlast       = nil,
+    FlyLoop               = nil,
+    NoclipLoop            = nil,
+    InfJumpConnection     = nil,
 }
 
 local threads = {}
@@ -2746,6 +2749,112 @@ local Button = DiabloTab:CreateButton({
         local slot = InventoryModule.getActiveSlot()
         if not tonumber(slot) then return end
         ClientRemotes.throwPie.fire({ slotIndex = tonumber(slot) })
+    end,
+})
+
+--// Batch 5 — client-side movement. Works in the lobby too (no ClientRemotes),
+--// so these are live-verifiable anywhere, not just in a match.
+
+local Section = DiabloTab:CreateSection({ name = "Movement" })
+
+local UserInputService = game:GetService("UserInputService")
+
+local FlySpeed = 60
+
+local Slider = DiabloTab:CreateSlider({
+    name = "Fly Speed",
+    range = {10, 300},
+    increment = 5,
+    suffix = "Speed",
+    value = FlySpeed,
+    flag = "DiabloFlySpeed",
+    callback = function(Value)
+        FlySpeed = Value
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Fly (WASD + Space/Shift)",
+    value = false,
+    flag = "DiabloFly",
+    callback = function(Value)
+
+        if connections.FlyLoop ~= nil then
+            connections.FlyLoop:Disconnect()
+            connections.FlyLoop = nil
+        end
+
+        -- The game ignores BodyVelocity (velocity is server-authoritative), but
+        -- direct CFrame writes replicate, so flight is done by stepping the root
+        -- part's CFrame each frame. Verified moving the character in-client.
+        if Value then
+            connections.FlyLoop = RunService.RenderStepped:Connect(function(dt)
+                local char = plr.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+
+                local cam = workspace.CurrentCamera
+                local dir = Vector3.zero
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0, 1, 0) end
+
+                if dir.Magnitude > 0 then
+                    hrp.CFrame = hrp.CFrame + dir.Unit * FlySpeed * dt
+                end
+            end)
+        end
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Noclip",
+    value = false,
+    flag = "DiabloNoclip",
+    callback = function(Value)
+
+        if connections.NoclipLoop ~= nil then
+            connections.NoclipLoop:Disconnect()
+            connections.NoclipLoop = nil
+        end
+
+        if Value then
+            connections.NoclipLoop = RunService.Stepped:Connect(function()
+                local char = plr.Character
+                if not char then return end
+                for _, part in pairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                    end
+                end
+            end)
+        end
+    end,
+})
+
+local Toggle = DiabloTab:CreateToggle({
+    name = "Infinite Jump",
+    value = false,
+    flag = "DiabloInfJump",
+    callback = function(Value)
+
+        if connections.InfJumpConnection ~= nil then
+            connections.InfJumpConnection:Disconnect()
+            connections.InfJumpConnection = nil
+        end
+
+        if Value then
+            connections.InfJumpConnection = UserInputService.JumpRequest:Connect(function()
+                local char = plr.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end)
+        end
     end,
 })
 end
