@@ -2952,6 +2952,45 @@ local Button = DiabloTab:CreateButton({
         end
     end,
 })
+
+--// Batch 7 — server tools. TeleportService + Teleport methods + HttpGet all
+--// verified present in the executor.
+
+local Section = DiabloTab:CreateSection({ name = "Server" })
+
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+local Button = DiabloTab:CreateButton({
+    name = "Rejoin Server",
+    callback = function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
+    end,
+})
+
+local Button = DiabloTab:CreateButton({
+    name = "Server Hop (new server)",
+    callback = function()
+        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        local ok, body = pcall(function() return game:HttpGet(url) end)
+        if not ok then return end
+
+        local decoded = HttpService:JSONDecode(body)
+        if not decoded or not decoded.data then return end
+
+        local candidates = {}
+        for _, srv in ipairs(decoded.data) do
+            if type(srv.id) == "string" and srv.id ~= game.JobId and srv.playing and srv.maxPlayers and srv.playing < srv.maxPlayers then
+                table.insert(candidates, srv.id)
+            end
+        end
+
+        if #candidates > 0 then
+            local pick = candidates[math.random(1, #candidates)]
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, pick, plr)
+        end
+    end,
+})
 end
 
 buildDiabloTab()
