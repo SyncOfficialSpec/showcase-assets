@@ -649,6 +649,7 @@ local connections = {
     --// COROUTINES \\--
 
     KillAuraCoroutine     = nil,
+    KillAuraRangeVis      = nil,
     AutoPickupCorpses     = nil,
     AutoGrindCorpses      = nil,
     AutoGrindItems        = nil,
@@ -1017,7 +1018,7 @@ local Slider = CombatTab:CreateSlider({
 })
 
 local Toggle = CombatTab:CreateToggle({
-    name = "Kill Aura (Must have melee weapon in hotbar)",
+    name = "Kill Aura (Melee or Gun in hotbar)",
     value = false,
     flag = "KillAura", -- A flag is the identifier for the configuration file; make sure every element has a different flag if you're using configuration saving to ensure no overlaps
     callback = function(Value)
@@ -1030,47 +1031,184 @@ local Toggle = CombatTab:CreateToggle({
         if Value then
             connections.KillAuraCoroutine = coroutine.create(function()
                 while task.wait(KillAuraDelayTime) do
-                    local SlotId = nil
+
+                    -- weapon pick: explicit override first, then a melee, then a
+                    -- gun. Melee keeps the original proven per-mob meleeAttack
+                    -- path; a gun uses fireProjectile with the mob Humanoids.
+                    local SlotId, weaponKind
                     if KillAuraWeaponOveride ~= nil then
                         SlotId = getItemSlot(KillAuraWeaponOveride)
+                        weaponKind = "melee"
                     else
                         SlotId = getItemSlot(nil, "Melee")
+                        if tonumber(SlotId) then
+                            weaponKind = "melee"
+                        else
+                            SlotId = getItemSlot(nil, "Gun")
+                            weaponKind = "gun"
+                        end
                     end
 
                     if CurrentKillAuraSlot ~= SlotId then
                         CurrentKillAuraSlot = tostring(SlotId)
                         KillAuraWeaponLabel:Set(tostring("Kill Aura Weapon Slot: "..CurrentKillAuraSlot))
                     end
-                    if tonumber(SlotId) then
+
+                    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+
+                    if tonumber(SlotId) and hrp then
+
+                        -- gather mobs (respecting range / infinite range)
+                        local inRange = {}
                         for _, mob in pairs(Monsters:GetChildren()) do
-                            if mob:FindFirstChild("HumanoidRootPart")then
-                                if KillAuraInfiniteRange then
-                                    ClientRemotes.meleeAttack.fire({
-                                        monsters = {mob},
-                                        civilians = {},
-                                        activeSlot = tonumber(SlotId)
+                            local root = mob:FindFirstChild("HumanoidRootPart")
+                            if root then
+                                if KillAuraInfiniteRange or (hrp.Position - root.Position).Magnitude <= KillAuraRange then
+                                    table.insert(inRange, mob)
+                                end
+                            end
+                        end
+
+                        if weaponKind == "gun" then
+                            -- fireProjectile takes up to 16 Humanoids per call
+                            local batch = {}
+                            local function flush()
+                                if #batch == 0 then return end
+                                local anchor = batch[1].Parent:FindFirstChild("HumanoidRootPart")
+                                local hums = {}
+                                for _, e in ipairs(batch) do table.insert(hums, e) end
+                                if anchor then
+                                    ClientRemotes.fireProjectile.fire({
+                                        slotIndex = tonumber(SlotId),
+                                        direction = (anchor.Position - hrp.Position).Unit,
+                                        humanoids = hums,
+                                        hitPosition = anchor.Position,
+                                        normal = Vector3.new(0, 1, 0),
                                     })
-                                else
-                                    local distance = (plr.Character.HumanoidRootPart.Position - mob:FindFirstChild("HumanoidRootPart").Position).Magnitude
-                                    if distance <= KillAuraRange then
-                                        ClientRemotes.meleeAttack.fire({
-                                            monsters = {mob},
-                                            civilians = {},
-                                            activeSlot = tonumber(SlotId)
-                                        })
-                                    end
                                 end
-                                --[[
-                                if KillAuraDelayTime > 0 then
-                                    task.wait(KillAuraDelayTime)
+                                batch = {}
+                            end
+                            for _, mob in ipairs(inRange) do
+                                local hum = mob:FindFirstChildOfClass("Humanoid")
+                                if hum then
+                                    table.insert(batch, hum)
+                                    if #batch >= 16 then flush() end
                                 end
-                                ]]
+                            end
+                            flush()
+                        else
+                            -- melee: original per-mob path, unchanged
+                            for _, mob in ipairs(inRange) do
+                                ClientRemotes.meleeAttack.fire({
+                                    monsters = {mob},
+                                    civilians = {},
+                                    activeSlot = tonumber(SlotId),
+                                })
                             end
                         end
                     end
                 end
             end)
             coroutine.resume(connections.KillAuraCoroutine)
+        end
+    end,
+})
+
+local Button = CombatTab:CreateButton({
+    name = "Kill All Mobs (Gun or Melee)",
+    callback = function()
+        if isLobbyPlace then return end
+        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local meleeSlot = getItemSlot(KillAuraWeaponOveride, KillAuraWeaponOveride and nil or "Melee")
+        local gunSlot = getItemSlot(nil, "Gun")
+
+        for _ = 1, 5 do
+            local targets = {}
+            for _, mob in pairs(Monsters:GetChildren()) do
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if mob:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0 then
+                    table.insert(targets, mob)
+                end
+            end
+            if #targets == 0 then break end
+
+            if tonumber(meleeSlot) then
+                for _, mob in ipairs(targets) do
+                    ClientRemotes.meleeAttack.fire({ monsters = {mob}, civilians = {}, activeSlot = tonumber(meleeSlot) })
+                end
+            elseif tonumber(gunSlot) then
+                local batch = {}
+                local function flush()
+                    if #batch == 0 then return end
+                    local anchor = batch[1].Parent.HumanoidRootPart
+                    local hums = {}
+                    for _, e in ipairs(batch) do table.insert(hums, e) end
+                    ClientRemotes.fireProjectile.fire({
+                        slotIndex = tonumber(gunSlot),
+                        direction = (anchor.Position - hrp.Position).Unit,
+                        humanoids = hums,
+                        hitPosition = anchor.Position,
+                        normal = Vector3.new(0, 1, 0),
+                    })
+                    batch = {}
+                end
+                for _, mob in ipairs(targets) do
+                    local hum = mob:FindFirstChildOfClass("Humanoid")
+                    if hum then table.insert(batch, hum) if #batch >= 16 then flush() end end
+                end
+                flush()
+            else
+                break
+            end
+            task.wait(0.12)
+        end
+    end,
+})
+
+local Toggle = CombatTab:CreateToggle({
+    name = "Show Kill Aura Range",
+    value = false,
+    flag = "KillAuraRangeVisual",
+    callback = function(Value)
+
+        if connections.KillAuraRangeVis ~= nil then
+            connections.KillAuraRangeVis:Disconnect()
+            connections.KillAuraRangeVis = nil
+        end
+
+        local old = game.Workspace:FindFirstChild("KillAuraSphere")
+        if old then old:Destroy() end
+
+        if Value then
+            local sphere = Instance.new("Part")
+            sphere.Name = "KillAuraSphere"
+            sphere.Shape = Enum.PartType.Ball
+            sphere.Material = Enum.Material.Neon
+            sphere.Color = Color3.fromRGB(255, 60, 60)
+            sphere.Transparency = 0.6
+            sphere.CanCollide = false
+            sphere.CanQuery = false
+            sphere.CanTouch = false
+            sphere.Anchored = true
+            sphere.CastShadow = false
+            sphere.Parent = game.Workspace
+
+            local outline = Instance.new("SelectionSphere")
+            outline.Adornee = sphere
+            outline.SurfaceTransparency = 1
+            outline.Color3 = Color3.fromRGB(255, 60, 60)
+            outline.Transparency = 0.3
+            outline.Parent = sphere
+
+            connections.KillAuraRangeVis = RunService.RenderStepped:Connect(function()
+                local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp or not sphere.Parent then return end
+                local r = KillAuraInfiniteRange and 2000 or KillAuraRange
+                sphere.Size = Vector3.new(1, 1, 1) * r * 2
+                sphere.CFrame = CFrame.new(hrp.Position)
+            end)
         end
     end,
 })
