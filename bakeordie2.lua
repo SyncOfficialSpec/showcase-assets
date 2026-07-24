@@ -3064,6 +3064,11 @@ local function getFreecam()
     return orcaFreecam or nil
 end
 
+-- This game runs CameraMode = LockFirstPerson, which re-pins the camera to the
+-- head every frame and would override the freecam. Release it to Classic while
+-- freecam runs, and restore the exact prior mode/zoom afterward.
+local savedCameraMode, savedMinZoom
+
 local Toggle = DiabloTab:CreateToggle({
     name = "Freecam (Orca: WASD, mouse, scroll = FOV)",
     value = false,
@@ -3071,10 +3076,23 @@ local Toggle = DiabloTab:CreateToggle({
     callback = function(Value)
         local fc = getFreecam()
         if not fc then return end
+
         if Value then
+            savedCameraMode = plr.CameraMode
+            savedMinZoom = plr.CameraMinZoomDistance
+            plr.CameraMode = Enum.CameraMode.Classic
+            plr.CameraMinZoomDistance = 0.5
             fc.EnableFreecam()
         else
             fc.DisableFreecam()
+            if savedCameraMode ~= nil then
+                plr.CameraMode = savedCameraMode
+                savedCameraMode = nil
+            end
+            if savedMinZoom ~= nil then
+                plr.CameraMinZoomDistance = savedMinZoom
+                savedMinZoom = nil
+            end
         end
     end,
 })
