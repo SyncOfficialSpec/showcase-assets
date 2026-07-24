@@ -3245,6 +3245,89 @@ local Toggle = GodTab:CreateToggle({
     end,
 })
 
+-- fire the current weapon at an explicit list of mob Models. Returns how many
+-- were targeted. Shared by Kill All (all mobs) and the aura.
+local function damageMobs(targets)
+    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp or #targets == 0 then return 0 end
+
+    local gunSlot = getItemSlot(nil, "Gun")
+    local meleeSlot = getItemSlot(nil, "Melee")
+
+    if tonumber(gunSlot) then
+        -- fireProjectile takes up to 16 humanoids per call, so batch them
+        local batch = {}
+        local function flush()
+            if #batch == 0 then return end
+            local anchor = batch[1]
+            ClientRemotes.fireProjectile.fire({
+                slotIndex = tonumber(gunSlot),
+                direction = (anchor.Parent.HumanoidRootPart.Position - hrp.Position).Unit,
+                humanoids = (function()
+                    local h = {}
+                    for _, e in ipairs(batch) do table.insert(h, e) end
+                    return h
+                end)(),
+                hitPosition = anchor.Parent.HumanoidRootPart.Position,
+                normal = Vector3.new(0, 1, 0),
+            })
+            batch = {}
+        end
+        for _, mob in ipairs(targets) do
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            if hum and root then
+                table.insert(batch, hum)
+                if #batch >= 16 then flush() end
+            end
+        end
+        flush()
+        return #targets
+    elseif tonumber(meleeSlot) then
+        ClientRemotes.meleeAttack.fire({
+            monsters = targets,
+            civilians = {},
+            activeSlot = tonumber(meleeSlot),
+        })
+        return #targets
+    end
+
+    return 0
+end
+
+local Button = GodTab:CreateButton({
+    name = "Kill All Mobs",
+    callback = function()
+        if isLobbyPlace then return end
+        local mons = game.Workspace:FindFirstChild("Monsters")
+        if not mons then return end
+
+        local targets = {}
+        for _, mob in pairs(mons:GetChildren()) do
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            if hum and root and hum.Health > 0 then
+                table.insert(targets, mob)
+            end
+        end
+
+        -- a few passes so batches over 16 and any per-hit falloff still clear
+        for _ = 1, 4 do
+            if #targets == 0 then break end
+            damageMobs(targets)
+            task.wait(0.12)
+            local remaining = {}
+            for _, mob in ipairs(targets) do
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if mob.Parent and hum and hum.Health > 0 then
+                    table.insert(remaining, mob)
+                end
+            end
+            targets = remaining
+        end
+    end,
+})
+
 local Section = GodTab:CreateSection({ name = "Range Visual" })
 
 local GodAuraColor = Color3.fromRGB(255, 60, 60)
