@@ -487,6 +487,7 @@ local TeleportTab = Window:CreateTab({ name = "Teleport", icon = 4483362458 })
 local SettingsTab = Window:CreateTab({ name = "Settings", icon = 4483362458 })
 local ScriptsTab = Window:CreateTab({ name = "Scripts", icon = 4483362458 })
 local DiabloTab = Window:CreateTab({ name = "DIABLO", icon = 4483362458 })
+local GodTab = Window:CreateTab({ name = "GOD", icon = 4483362458 })
 
 local Section = HomeTab:CreateSection({ name = "Disord Server" })
 
@@ -671,6 +672,9 @@ local connections = {
     MonsterESP            = nil,
     FreecamLoop           = nil,
     FreecamInput          = nil,
+    GodKillAura           = nil,
+    GodRangeVis           = nil,
+    GodMobList            = nil,
 }
 
 local threads = {}
@@ -3099,6 +3103,191 @@ local Toggle = DiabloTab:CreateToggle({
 end
 
 buildDiabloTab()
+
+---------------------------------------------------------------
+--- GOD
+---------------------------------------------------------------
+-- Universal kill aura. Damage is dealt with whatever weapon is equipped:
+--   * a Gun fires fireProjectile with the in-range mob Humanoids as the hit
+--     list (verified 220 -> 0 on a CactusCreeper),
+--   * a Melee fires meleeAttack with the mob Models (the game's own path).
+-- Mobs are read live from workspace.Monsters. Range is adjustable and can be
+-- drawn as a translucent sphere around the player.
+-- Built in its own function so its element handles get a fresh register budget.
+
+local function buildGodTab()
+
+local GodAuraRange = 60
+local GodAuraDelay = 0.1
+
+local Section = GodTab:CreateSection({ name = "Kill Aura" })
+
+local MobListLabel = CreateLabel(GodTab, "Mobs in range: (aura off)", 4483362458)
+
+local Slider = GodTab:CreateSlider({
+    name = "Aura Range",
+    range = {10, 500},
+    increment = 5,
+    suffix = "Distance",
+    value = GodAuraRange,
+    flag = "GodAuraRange",
+    callback = function(Value)
+        GodAuraRange = Value
+    end,
+})
+
+local Slider = GodTab:CreateSlider({
+    name = "Aura Delay (raise if laggy)",
+    range = {0, 0.5},
+    increment = 0.01,
+    suffix = "s",
+    value = GodAuraDelay,
+    flag = "GodAuraDelay",
+    callback = function(Value)
+        GodAuraDelay = Value
+    end,
+})
+
+-- collect the mobs inside the aura, plus a live type breakdown
+local function collectMobs()
+    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    local mons = game.Workspace:FindFirstChild("Monsters")
+    local inRange, counts = {}, {}
+    if not hrp or not mons then return inRange, counts end
+
+    for _, mob in pairs(mons:GetChildren()) do
+        local root = mob:FindFirstChild("HumanoidRootPart")
+        local hum = mob:FindFirstChildOfClass("Humanoid")
+        if root and hum and hum.Health > 0 then
+            if (hrp.Position - root.Position).Magnitude <= GodAuraRange then
+                table.insert(inRange, mob)
+                counts[mob.Name] = (counts[mob.Name] or 0) + 1
+            end
+        end
+    end
+    return inRange, counts
+end
+
+local Toggle = GodTab:CreateToggle({
+    name = "Kill Aura (Gun or Melee)",
+    value = false,
+    flag = "GodKillAura",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.GodKillAura ~= nil then
+            coroutine.close(connections.GodKillAura)
+            connections.GodKillAura = nil
+        end
+        if connections.GodMobList ~= nil then
+            coroutine.close(connections.GodMobList)
+            connections.GodMobList = nil
+        end
+
+        if not Value then
+            MobListLabel:Set("Mobs in range: (aura off)")
+            return
+        end
+
+        -- live mob-list label
+        connections.GodMobList = coroutine.create(function()
+            while task.wait(0.3) do
+                local _, counts = collectMobs()
+                local parts = {}
+                for name, c in pairs(counts) do parts[#parts + 1] = name .. " x" .. c end
+                MobListLabel:Set(#parts > 0 and ("In range: " .. table.concat(parts, ", ")) or "Mobs in range: none")
+            end
+        end)
+        coroutine.resume(connections.GodMobList)
+
+        -- the aura itself
+        connections.GodKillAura = coroutine.create(function()
+            while task.wait(GodAuraDelay) do
+                local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp then continue end
+
+                local targets = collectMobs()
+                if #targets == 0 then continue end
+
+                local gunSlot = getItemSlot(nil, "Gun")
+                local meleeSlot = getItemSlot(nil, "Melee")
+
+                if tonumber(gunSlot) then
+                    -- fireProjectile hits up to 16 humanoids per call
+                    local humanoids = {}
+                    for _, mob in ipairs(targets) do
+                        local hum = mob:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            table.insert(humanoids, hum)
+                            if #humanoids >= 16 then break end
+                        end
+                    end
+                    local first = targets[1]:FindFirstChild("HumanoidRootPart")
+                    if first and #humanoids > 0 then
+                        ClientRemotes.fireProjectile.fire({
+                            slotIndex = tonumber(gunSlot),
+                            direction = (first.Position - hrp.Position).Unit,
+                            humanoids = humanoids,
+                            hitPosition = first.Position,
+                            normal = Vector3.new(0, 1, 0),
+                        })
+                    end
+                elseif tonumber(meleeSlot) then
+                    ClientRemotes.meleeAttack.fire({
+                        monsters = targets,
+                        civilians = {},
+                        activeSlot = tonumber(meleeSlot),
+                    })
+                end
+            end
+        end)
+        coroutine.resume(connections.GodKillAura)
+    end,
+})
+
+local Section = GodTab:CreateSection({ name = "Range Visual" })
+
+local Toggle = GodTab:CreateToggle({
+    name = "Show Aura Range",
+    value = false,
+    flag = "GodShowRange",
+    callback = function(Value)
+
+        if connections.GodRangeVis ~= nil then
+            connections.GodRangeVis:Disconnect()
+            connections.GodRangeVis = nil
+        end
+
+        local existing = game.Workspace:FindFirstChild("GodAuraSphere")
+        if existing then existing:Destroy() end
+
+        if Value then
+            local sphere = Instance.new("Part")
+            sphere.Name = "GodAuraSphere"
+            sphere.Shape = Enum.PartType.Ball
+            sphere.Material = Enum.Material.ForceField
+            sphere.Color = Color3.fromRGB(255, 60, 60)
+            sphere.Transparency = 0.7
+            sphere.CanCollide = false
+            sphere.CanQuery = false
+            sphere.CanTouch = false
+            sphere.Anchored = true
+            sphere.Massless = true
+            sphere.Parent = game.Workspace
+
+            connections.GodRangeVis = RunService.RenderStepped:Connect(function()
+                local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp or not sphere.Parent then return end
+                sphere.Size = Vector3.new(1, 1, 1) * GodAuraRange * 2
+                sphere.CFrame = CFrame.new(hrp.Position)
+            end)
+        end
+    end,
+})
+
+end
+
+buildGodTab()
 
 ---------------------------------------------------------------
 --- TITLE FITTING
