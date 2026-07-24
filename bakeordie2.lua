@@ -3573,6 +3573,22 @@ buildGodTab()
 
 local function buildUltraTab()
 
+---- Master -------------------------------------------------------------------
+
+local Section = UltraTab:CreateSection({ name = "One Click" })
+
+local Toggle = UltraTab:CreateToggle({
+    name = "ULTRA MODE (God Mode + Kill Aura)",
+    value = false,
+    flag = "UltraMasterMode",
+    callback = function(Value)
+        -- drives the individual toggles through their flags, so their UI state
+        -- and callbacks stay in sync. window:Set is verified to fire the callback.
+        pcall(function() Window:Set("UltraGodMode", Value) end)
+        pcall(function() Window:Set("UltraKillAura", Value) end)
+    end,
+})
+
 ---- Survival -----------------------------------------------------------------
 
 local Section = UltraTab:CreateSection({ name = "Survival" })
