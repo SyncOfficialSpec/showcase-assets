@@ -488,6 +488,7 @@ local SettingsTab = Window:CreateTab({ name = "Settings", icon = 4483362458 })
 local ScriptsTab = Window:CreateTab({ name = "Scripts", icon = 4483362458 })
 local DiabloTab = Window:CreateTab({ name = "DIABLO", icon = 4483362458 })
 local GodTab = Window:CreateTab({ name = "GOD", icon = 4483362458 })
+local UltraTab = Window:CreateTab({ name = "Ultra Combat", icon = 4483362458 })
 
 local Section = HomeTab:CreateSection({ name = "Disord Server" })
 
@@ -676,6 +677,11 @@ local connections = {
     GodKillAura           = nil,
     GodRangeVis           = nil,
     GodMobList            = nil,
+    UltraGodMode          = nil,
+    UltraGodModeChar      = nil,
+    UltraKillAura         = nil,
+    UltraAutoRevive       = nil,
+    UltraAntiVoid         = nil,
 }
 
 local threads = {}
@@ -3555,6 +3561,265 @@ local Slider = GodTab:CreateSlider({
 end
 
 buildGodTab()
+
+---------------------------------------------------------------
+--- ULTRA COMBAT
+---------------------------------------------------------------
+-- Verified live in this game: the local Humanoid's health is client-authoritative
+-- (MaxHealth set to 1e9 held, the server did not correct it). So godmode is a
+-- real health lock, backed by a ForceField instance and death-state suppression.
+-- Offense reuses the proven fireProjectile / meleeAttack kill path with no range
+-- cap. Built in its own function for the local-register budget.
+
+local function buildUltraTab()
+
+---- Survival -----------------------------------------------------------------
+
+local Section = UltraTab:CreateSection({ name = "Survival" })
+
+local GodModeOn = false
+
+local function applyGodMode(char)
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    hum.MaxHealth = 1e9
+    hum.Health = 1e9
+    hum.BreakJointsOnDeath = false
+    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+
+    if not char:FindFirstChild("UltraForceField") then
+        local ff = Instance.new("ForceField")
+        ff.Name = "UltraForceField"
+        ff.Visible = true
+        ff.Parent = char
+    end
+end
+
+local function clearGodMode(char)
+    if not char then return end
+    local ff = char:FindFirstChild("UltraForceField")
+    if ff then ff:Destroy() end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true) end)
+        hum.BreakJointsOnDeath = true
+        hum.MaxHealth = 100
+        hum.Health = 100
+    end
+end
+
+local Toggle = UltraTab:CreateToggle({
+    name = "God Mode (Real Forcefield, can't die)",
+    value = false,
+    flag = "UltraGodMode",
+    callback = function(Value)
+        GodModeOn = Value
+
+        if connections.UltraGodMode ~= nil then
+            connections.UltraGodMode:Disconnect()
+            connections.UltraGodMode = nil
+        end
+        if connections.UltraGodModeChar ~= nil then
+            connections.UltraGodModeChar:Disconnect()
+            connections.UltraGodModeChar = nil
+        end
+
+        if Value then
+            applyGodMode(plr.Character)
+
+            -- reapply on every respawn
+            connections.UltraGodModeChar = plr.CharacterAdded:Connect(function(char)
+                char:WaitForChild("Humanoid")
+                task.wait(0.2)
+                if GodModeOn then applyGodMode(char) end
+            end)
+
+            -- relock health every frame so nothing chips it down
+            connections.UltraGodMode = RunService.Stepped:Connect(function()
+                local char = plr.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    if hum.MaxHealth ~= 1e9 then hum.MaxHealth = 1e9 end
+                    hum.Health = 1e9
+                end
+                if char and not char:FindFirstChild("UltraForceField") then
+                    local ff = Instance.new("ForceField")
+                    ff.Name = "UltraForceField"
+                    ff.Visible = true
+                    ff.Parent = char
+                end
+            end)
+        else
+            clearGodMode(plr.Character)
+        end
+    end,
+})
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Auto Revive Self",
+    value = false,
+    flag = "UltraAutoRevive",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.UltraAutoRevive ~= nil then
+            coroutine.close(connections.UltraAutoRevive)
+            connections.UltraAutoRevive = nil
+        end
+
+        if Value then
+            connections.UltraAutoRevive = coroutine.create(function()
+                while task.wait(0.4) do
+                    local char = plr.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    -- revive if downed or low; free revive first, clutch as backup
+                    if hum and hum.Health <= 0 then
+                        pcall(function() ClientRemotes.useFreeRevive.fire() end)
+                        pcall(function() ClientRemotes.useClutchRevive.fire() end)
+                    end
+                    if plr.Character and plr.Character:GetAttribute("Downed") then
+                        pcall(function() ClientRemotes.useFreeRevive.fire() end)
+                    end
+                end
+            end)
+            coroutine.resume(connections.UltraAutoRevive)
+        end
+    end,
+})
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Anti Void (teleport back if falling)",
+    value = false,
+    flag = "UltraAntiVoid",
+    callback = function(Value)
+
+        if connections.UltraAntiVoid ~= nil then
+            connections.UltraAntiVoid:Disconnect()
+            connections.UltraAntiVoid = nil
+        end
+
+        if Value then
+            local lastSafe
+            connections.UltraAntiVoid = RunService.Stepped:Connect(function()
+                local char = plr.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                if hrp.Position.Y > -30 then
+                    lastSafe = hrp.CFrame
+                elseif lastSafe then
+                    hrp.CFrame = lastSafe
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                end
+            end)
+        end
+    end,
+})
+
+---- Offense ------------------------------------------------------------------
+
+local Section = UltraTab:CreateSection({ name = "Offense" })
+
+local UltraMobLabel = CreateLabel(UltraTab, "Ultimate Aura: off", 4483362458)
+
+-- shared: fire the current weapon at a target list, no range cap
+local function ultraDamage(targets)
+    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp or #targets == 0 then return end
+
+    local meleeSlot = getItemSlot(nil, "Melee")
+    local gunSlot = getItemSlot(nil, "Gun")
+
+    if tonumber(meleeSlot) then
+        for _, mob in ipairs(targets) do
+            ClientRemotes.meleeAttack.fire({ monsters = {mob}, civilians = {}, activeSlot = tonumber(meleeSlot) })
+        end
+    elseif tonumber(gunSlot) then
+        local batch = {}
+        local function flush()
+            if #batch == 0 then return end
+            local anchor = batch[1].Parent:FindFirstChild("HumanoidRootPart")
+            if anchor then
+                local hums = {}
+                for _, e in ipairs(batch) do table.insert(hums, e) end
+                ClientRemotes.fireProjectile.fire({
+                    slotIndex = tonumber(gunSlot),
+                    direction = (anchor.Position - hrp.Position).Unit,
+                    humanoids = hums,
+                    hitPosition = anchor.Position,
+                    normal = Vector3.new(0, 1, 0),
+                })
+            end
+            batch = {}
+        end
+        for _, mob in ipairs(targets) do
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            if hum then table.insert(batch, hum) if #batch >= 16 then flush() end end
+        end
+        flush()
+    end
+end
+
+local function allMobs()
+    local mons = game.Workspace:FindFirstChild("Monsters")
+    local out = {}
+    if not mons then return out end
+    for _, mob in pairs(mons:GetChildren()) do
+        local hum = mob:FindFirstChildOfClass("Humanoid")
+        if mob:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0 then
+            table.insert(out, mob)
+        end
+    end
+    return out
+end
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Ultimate Kill Aura (all mobs, no range)",
+    value = false,
+    flag = "UltraKillAura",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.UltraKillAura ~= nil then
+            coroutine.close(connections.UltraKillAura)
+            connections.UltraKillAura = nil
+        end
+
+        if not Value then
+            UltraMobLabel:Set("Ultimate Aura: off")
+            return
+        end
+
+        connections.UltraKillAura = coroutine.create(function()
+            while task.wait() do
+                local targets = allMobs()
+                UltraMobLabel:Set("Ultimate Aura: " .. #targets .. " mobs")
+                if #targets > 0 then
+                    ultraDamage(targets)
+                end
+            end
+        end)
+        coroutine.resume(connections.UltraKillAura)
+    end,
+})
+
+local Button = UltraTab:CreateButton({
+    name = "NUKE ALL (instant clear)",
+    callback = function()
+        if isLobbyPlace then return end
+        for _ = 1, 6 do
+            local targets = allMobs()
+            if #targets == 0 then break end
+            ultraDamage(targets)
+            task.wait(0.1)
+        end
+    end,
+})
+
+end
+
+buildUltraTab()
 
 ---------------------------------------------------------------
 --- TITLE FITTING
