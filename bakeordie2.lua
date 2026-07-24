@@ -3247,6 +3247,9 @@ local Toggle = GodTab:CreateToggle({
 
 local Section = GodTab:CreateSection({ name = "Range Visual" })
 
+local GodAuraColor = Color3.fromRGB(255, 60, 60)
+local GodAuraTransparency = 0.55
+
 local Toggle = GodTab:CreateToggle({
     name = "Show Aura Range",
     value = false,
@@ -3262,26 +3265,69 @@ local Toggle = GodTab:CreateToggle({
         if existing then existing:Destroy() end
 
         if Value then
+            -- Neon renders as a solid glow visible from inside the ball, unlike
+            -- ForceField which was nearly transparent. A SelectionSphere on top
+            -- gives a crisp coloured outline so the edge reads clearly too.
             local sphere = Instance.new("Part")
             sphere.Name = "GodAuraSphere"
             sphere.Shape = Enum.PartType.Ball
-            sphere.Material = Enum.Material.ForceField
-            sphere.Color = Color3.fromRGB(255, 60, 60)
-            sphere.Transparency = 0.7
+            sphere.Material = Enum.Material.Neon
+            sphere.Color = GodAuraColor
+            sphere.Transparency = GodAuraTransparency
             sphere.CanCollide = false
             sphere.CanQuery = false
             sphere.CanTouch = false
             sphere.Anchored = true
             sphere.Massless = true
+            sphere.CastShadow = false
             sphere.Parent = game.Workspace
+
+            local outline = Instance.new("SelectionSphere")
+            outline.Name = "Outline"
+            outline.Adornee = sphere
+            outline.SurfaceTransparency = 1
+            outline.Color3 = GodAuraColor
+            outline.Transparency = 0.2
+            outline.Parent = sphere
 
             connections.GodRangeVis = RunService.RenderStepped:Connect(function()
                 local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
                 if not hrp or not sphere.Parent then return end
                 sphere.Size = Vector3.new(1, 1, 1) * GodAuraRange * 2
                 sphere.CFrame = CFrame.new(hrp.Position)
+                sphere.Color = GodAuraColor
+                sphere.Transparency = GodAuraTransparency
+                outline.Color3 = GodAuraColor
             end)
         end
+    end,
+})
+
+local ColorPicker = GodTab:CreateColorPicker({
+    name = "Aura Range Color",
+    color = GodAuraColor,
+    flag = "GodAuraColor",
+    callback = function(color)
+        GodAuraColor = color
+        local sphere = game.Workspace:FindFirstChild("GodAuraSphere")
+        if sphere then
+            sphere.Color = color
+            local outline = sphere:FindFirstChild("Outline")
+            if outline then outline.Color3 = color end
+        end
+    end,
+})
+
+local Slider = GodTab:CreateSlider({
+    name = "Range Visual Opacity",
+    range = {0, 90},
+    increment = 5,
+    suffix = "%",
+    value = 45,
+    flag = "GodRangeOpacity",
+    callback = function(Value)
+        -- higher slider = more opaque, so transparency is the inverse
+        GodAuraTransparency = 1 - (Value / 100)
     end,
 })
 
