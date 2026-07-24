@@ -682,6 +682,9 @@ local connections = {
     UltraKillAura         = nil,
     UltraAutoRevive       = nil,
     UltraAntiVoid         = nil,
+    UltraChestESP         = nil,
+    UltraLootESP          = nil,
+    UltraMagnet           = nil,
 }
 
 local threads = {}
@@ -3829,6 +3832,115 @@ local Button = UltraTab:CreateButton({
             if #targets == 0 then break end
             ultraDamage(targets)
             task.wait(0.1)
+        end
+    end,
+})
+
+---- Farming ------------------------------------------------------------------
+-- Highlight + BillboardGui + CFrame primitives verified in the executor. The
+-- world folders these read (Containers, Interactables) are match-only, so these
+-- show once you're in a round, the same as the kill aura needs mobs.
+
+local Section = UltraTab:CreateSection({ name = "Farming" })
+
+local function espFolder(folderName, connKey, color, holderName)
+    if connections[connKey] ~= nil then
+        connections[connKey]:Disconnect()
+        connections[connKey] = nil
+    end
+
+    local function clear()
+        for _, obj in pairs(game.Workspace:GetDescendants()) do
+            if obj.Name == holderName and obj:IsA("Highlight") then obj:Destroy() end
+        end
+    end
+
+    clear()
+
+    return function(enabled)
+        if connections[connKey] ~= nil then
+            connections[connKey]:Disconnect()
+            connections[connKey] = nil
+        end
+        clear()
+        if not enabled then return end
+
+        connections[connKey] = RunService.Heartbeat:Connect(function()
+            local folder = game.Workspace:FindFirstChild(folderName)
+            if not folder then return end
+            for _, obj in pairs(folder:GetChildren()) do
+                if obj:IsA("Model") or obj:IsA("BasePart") then
+                    if not obj:FindFirstChild(holderName) then
+                        local hl = Instance.new("Highlight")
+                        hl.Name = holderName
+                        hl.FillColor = color
+                        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                        hl.FillTransparency = 0.5
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        hl.Parent = obj
+                    end
+                end
+            end
+        end)
+    end
+end
+
+local setChestESP = espFolder("Containers", "UltraChestESP", Color3.fromRGB(255, 215, 0), "UltraChestHL")
+local setLootESP = espFolder("Interactables", "UltraLootESP", Color3.fromRGB(0, 200, 255), "UltraLootHL")
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Chest / Container ESP",
+    value = false,
+    flag = "UltraChestESP",
+    callback = function(Value)
+        setChestESP(Value)
+    end,
+})
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Loot / Drop ESP",
+    value = false,
+    flag = "UltraLootESP",
+    callback = function(Value)
+        setLootESP(Value)
+    end,
+})
+
+local Toggle = UltraTab:CreateToggle({
+    name = "Item Magnet (pull drops to you)",
+    value = false,
+    flag = "UltraMagnet",
+    callback = function(Value)
+        if isLobbyPlace then return end
+
+        if connections.UltraMagnet ~= nil then
+            coroutine.close(connections.UltraMagnet)
+            connections.UltraMagnet = nil
+        end
+
+        if Value then
+            connections.UltraMagnet = coroutine.create(function()
+                while task.wait(0.2) do
+                    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                    local inter = game.Workspace:FindFirstChild("Interactables")
+                    if not hrp or not inter then continue end
+
+                    for _, obj in pairs(inter:GetChildren()) do
+                        if obj:GetAttribute("ObjectUUID") == nil then continue end
+                        local info = ObjectsLibrary.Objects[obj.Name]
+                        if not info or not info.Tags then continue end
+                        -- only pull loot-ish drops, not products or hazards
+                        local pull = table.find(info.Tags, "Ingredient")
+                            or table.find(info.Tags, "Raw")
+                            or table.find(info.Tags, "BakedGood")
+                            or table.find(info.Tags, "CraftingPart")
+                        if pull and not obj:GetAttribute("IsProduct") then
+                            obj:PivotTo(hrp.CFrame * CFrame.new(0, -2, -2))
+                        end
+                    end
+                end
+            end)
+            coroutine.resume(connections.UltraMagnet)
         end
     end,
 })
