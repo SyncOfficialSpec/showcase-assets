@@ -691,6 +691,7 @@ local connections = {
     NanoRejoin            = nil,
     NanoRejoinFail        = nil,
     NanoUptime            = nil,
+    NanoAutoPlay          = nil,
 }
 
 local threads = {}
@@ -4060,6 +4061,39 @@ local Button = NanoTab:CreateButton({
     end,
 })
 
+-- When you die you drop back to the lobby (workspace attribute "Place" ==
+-- "Lobby"). This fires the lobby's own PLAY NOW join (joinProOrNormalServer,
+-- no args, verified to teleport into a match) on a timer until back in a round,
+-- so death just bounces you straight into another game.
+local function setAutoPlay(enabled)
+    if connections.NanoAutoPlay ~= nil then
+        coroutine.close(connections.NanoAutoPlay)
+        connections.NanoAutoPlay = nil
+    end
+
+    if not enabled then return end
+
+    connections.NanoAutoPlay = coroutine.create(function()
+        while task.wait(5) do
+            if game.Workspace:GetAttribute("Place") == "Lobby" then
+                pcall(function()
+                    require(game.ReplicatedStorage.Client.ClientRemotes).lobby.joinProOrNormalServer.fire()
+                end)
+            end
+        end
+    end)
+    coroutine.resume(connections.NanoAutoPlay)
+end
+
+local Toggle = NanoTab:CreateToggle({
+    name = "Auto Play (rejoin match when you die)",
+    value = false,
+    flag = "NanoAutoPlay",
+    callback = function(Value)
+        setAutoPlay(Value)
+    end,
+})
+
 ---- Dominate -----------------------------------------------------------------
 
 local Section = NanoTab:CreateSection({ name = "Domination" })
@@ -4085,6 +4119,7 @@ local Toggle = NanoTab:CreateToggle({
         -- toggle's UI and logic stay in sync
         pcall(function() Window:Set("NanoAntiAFK", Value) end)
         pcall(function() Window:Set("NanoRejoin", Value) end)
+        pcall(function() Window:Set("NanoAutoPlay", Value) end)
         pcall(function() Window:Set("UltraGodMode", Value) end)
         pcall(function() Window:Set("UltraKillAura", Value) end)
         pcall(function() Window:Set("SkipDay", Value) end)
