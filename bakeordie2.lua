@@ -489,6 +489,7 @@ local ScriptsTab = Window:CreateTab({ name = "Scripts", icon = 4483362458 })
 local DiabloTab = Window:CreateTab({ name = "DIABLO", icon = 4483362458 })
 local GodTab = Window:CreateTab({ name = "GOD", icon = 4483362458 })
 local UltraTab = Window:CreateTab({ name = "Ultra Combat", icon = 4483362458 })
+local NanoTab = Window:CreateTab({ name = "Nano Dominate", icon = 4483362458 })
 
 local Section = HomeTab:CreateSection({ name = "Disord Server" })
 
@@ -685,6 +686,11 @@ local connections = {
     UltraChestESP         = nil,
     UltraLootESP          = nil,
     UltraMagnet           = nil,
+    NanoAntiAFK           = nil,
+    NanoAntiAFKLoop       = nil,
+    NanoRejoin            = nil,
+    NanoRejoinFail        = nil,
+    NanoUptime            = nil,
 }
 
 local threads = {}
@@ -3950,6 +3956,163 @@ end
 buildUltraTab()
 
 ---------------------------------------------------------------
+--- NANO DOMINATE
+---------------------------------------------------------------
+-- Built to run the game hands-off for hours: godmode + kill aura + auto skip
+-- day, kept alive by a robust anti-AFK (Idled hook + periodic controller pulse)
+-- and auto-rejoin on disconnect. All primitives verified present in the client
+-- (VirtualUser, Players.Idled, TeleportService, GuiService.ErrorMessageChanged).
+
+local function buildNanoTab()
+
+local VirtualUser = game:GetService("VirtualUser")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+
+---- Anti-AFK -----------------------------------------------------------------
+
+local Section = NanoTab:CreateSection({ name = "Stay Connected" })
+
+local function setAntiAFK(enabled)
+    if connections.NanoAntiAFK ~= nil then
+        connections.NanoAntiAFK:Disconnect()
+        connections.NanoAntiAFK = nil
+    end
+    if connections.NanoAntiAFKLoop ~= nil then
+        coroutine.close(connections.NanoAntiAFKLoop)
+        connections.NanoAntiAFKLoop = nil
+    end
+
+    if not enabled then return end
+
+    -- 1) the moment Roblox flags us idle, pulse the controller
+    connections.NanoAntiAFK = plr.Idled:Connect(function()
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end)
+    end)
+
+    -- 2) don't even wait for Idled: pulse every 60s so the 20-min idle timer
+    --    never builds up in the first place
+    connections.NanoAntiAFKLoop = coroutine.create(function()
+        while task.wait(60) do
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+                VirtualUser:SetKeyDown("0")
+                VirtualUser:SetKeyUp("0")
+            end)
+        end
+    end)
+    coroutine.resume(connections.NanoAntiAFKLoop)
+end
+
+local Toggle = NanoTab:CreateToggle({
+    name = "Anti AFK (pulse every step)",
+    value = false,
+    flag = "NanoAntiAFK",
+    callback = function(Value)
+        setAntiAFK(Value)
+    end,
+})
+
+local function setRejoin(enabled)
+    if connections.NanoRejoin ~= nil then
+        connections.NanoRejoin:Disconnect()
+        connections.NanoRejoin = nil
+    end
+    if connections.NanoRejoinFail ~= nil then
+        connections.NanoRejoinFail:Disconnect()
+        connections.NanoRejoinFail = nil
+    end
+
+    if not enabled then return end
+
+    local placeId = game.PlaceId
+
+    -- any Roblox error prompt (kick / disconnect) → teleport straight back
+    connections.NanoRejoin = GuiService.ErrorMessageChanged:Connect(function()
+        task.wait(1)
+        pcall(function() TeleportService:Teleport(placeId, plr) end)
+    end)
+
+    -- if the teleport itself fails, keep retrying
+    connections.NanoRejoinFail = TeleportService.TeleportInitFailed:Connect(function()
+        task.wait(3)
+        pcall(function() TeleportService:Teleport(placeId, plr) end)
+    end)
+end
+
+local Toggle = NanoTab:CreateToggle({
+    name = "Auto Rejoin if Kicked",
+    value = false,
+    flag = "NanoRejoin",
+    callback = function(Value)
+        setRejoin(Value)
+    end,
+})
+
+local Button = NanoTab:CreateButton({
+    name = "Rejoin Now",
+    callback = function()
+        pcall(function() TeleportService:Teleport(game.PlaceId, plr) end)
+    end,
+})
+
+---- Dominate -----------------------------------------------------------------
+
+local Section = NanoTab:CreateSection({ name = "Domination" })
+
+local UptimeStat = NanoTab:CreateStat({
+    name = "Uptime (min)",
+    value = 0,
+    changeMode = "absolute",
+    numberEasing = false,
+})
+
+local DominateOn = false
+
+local Toggle = NanoTab:CreateToggle({
+    name = "DOMINATE (hands-off, runs for hours)",
+    description = nil,
+    value = false,
+    flag = "NanoDominate",
+    callback = function(Value)
+        DominateOn = Value
+
+        -- flip every survival + farm system on through its own flag, so each
+        -- toggle's UI and logic stay in sync
+        pcall(function() Window:Set("NanoAntiAFK", Value) end)
+        pcall(function() Window:Set("NanoRejoin", Value) end)
+        pcall(function() Window:Set("UltraGodMode", Value) end)
+        pcall(function() Window:Set("UltraKillAura", Value) end)
+        pcall(function() Window:Set("SkipDay", Value) end)
+
+        -- uptime counter
+        if connections.NanoUptime ~= nil then
+            coroutine.close(connections.NanoUptime)
+            connections.NanoUptime = nil
+        end
+        if Value then
+            local mins = 0
+            UptimeStat:Set(0)
+            connections.NanoUptime = coroutine.create(function()
+                while task.wait(60) do
+                    mins = mins + 1
+                    UptimeStat:Set(mins)
+                end
+            end)
+            coroutine.resume(connections.NanoUptime)
+        end
+    end,
+})
+
+end
+
+buildNanoTab()
+
+---------------------------------------------------------------
 --- TITLE FITTING
 ---------------------------------------------------------------
 -- Every Gen2 element builds its title holder as a hardcoded 170px box:
@@ -4046,3 +4209,13 @@ do
 end
 
 initScript()
+
+-- Autonomous domination hook: if this global is set before the script runs
+-- (e.g. by a babysit loop re-executing after a rejoin), turn DOMINATE on by
+-- itself so the game keeps being played hands-off without a manual click.
+if getgenv and getgenv().NanoAutoDominate then
+    task.spawn(function()
+        task.wait(2)
+        pcall(function() Window:Set("NanoDominate", true) end)
+    end)
+end
